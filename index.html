@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+  <meta name="theme-color" content="#f2f2f7">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="description" content="부산광역시 상가(상권) 정보를 지도에서 검색하고 상세 정보를 확인하세요.">
+  <title>부산 상가지도</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23007AFF'/%3E%3Cpath d='M32 50s14-11.5 14-24a14 14 0 10-28 0c0 12.5 14 24 14 24z' fill='%23fff'/%3E%3Ccircle cx='32' cy='26' r='5.5' fill='%23007AFF'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="map" aria-label="부산 상가 지도"></div>
+
+  <!-- 좌측 패널(데스크톱) / 바텀시트(모바일) -->
+  <aside id="sidebar" class="sidebar glass" data-detent="peek" aria-label="상가 검색 및 목록">
+    <div id="grab" class="grab" role="separator" aria-label="패널 크기 조절"><span></span></div>
+    <header class="sb-head">
+      <div class="sb-title">
+        <h1>부산 상가지도</h1>
+        <p id="sub">부산광역시</p>
+      </div>
+      <label class="searchbar" for="q">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+        <input id="q" type="search" placeholder="상호명 · 주소 · 초성 검색" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="상가 검색">
+        <button id="q-clear" class="clear" type="button" aria-label="검색어 지우기" hidden>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7" stroke="var(--clear-x, #fff)" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </label>
+      <div id="chips" class="chips" role="group" aria-label="업종 필터"></div>
+    </header>
+
+    <div id="sb-body" class="sb-body">
+      <section id="view-search" hidden>
+        <div id="search-head" class="list-head"></div>
+        <ul id="search-results" class="list"></ul>
+      </section>
+      <section id="view-list">
+        <div id="tabs" class="seg tabs" role="tablist" aria-label="목록 종류"></div>
+        <div id="list-head"></div>
+        <div id="summary" class="summary"></div>
+        <div id="radius-banner" class="rbanner" hidden></div>
+        <ul id="list" class="list"></ul>
+        <button id="more" class="btn-more" type="button" hidden>더 보기</button>
+      </section>
+    </div>
+  </aside>
+
+  <!-- 지도 컨트롤 -->
+  <div class="ctrls">
+    <div class="cgroup glass">
+      <button id="btn-layers" class="cbtn" type="button" aria-label="지도 설정" title="지도 설정">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5l9 4.8-9 4.8-9-4.8z"/><path d="M3 12.2l9 4.8 9-4.8"/><path d="M3 16l9 4.8 9-4.8"/></svg>
+      </button>
+      <button id="btn-locate" class="cbtn" type="button" aria-label="내 위치" title="내 위치">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 3.5L3.8 10.6c-.9.4-.8 1.7.2 1.9l6.6 1.6 1.6 6.6c.2 1 1.5 1.1 1.9.2z"/></svg>
+      </button>
+    </div>
+    <div class="cgroup glass">
+      <button id="btn-zoom-in" class="cbtn" type="button" aria-label="확대" title="확대">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button id="btn-zoom-out" class="cbtn" type="button" aria-label="축소" title="축소">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
+      </button>
+    </div>
+
+    <div id="layer-pop" class="pop glass" hidden>
+      <div class="pop-title">지도 유형</div>
+      <div class="seg" data-seg="basemap">
+        <button type="button" data-v="std">표준</button>
+        <button type="button" data-v="osm">OSM</button>
+        <button type="button" data-v="sat">위성</button>
+      </div>
+      <label class="pop-row">
+        <span><b>상권 밀집도</b><small>히트맵으로 상가가 몰린 곳 보기</small></span>
+        <input id="heat" class="switch" type="checkbox" role="switch">
+      </label>
+      <div class="pop-title">화면 모드</div>
+      <div class="seg" data-seg="theme">
+        <button type="button" data-v="auto">자동</button>
+        <button type="button" data-v="light">라이트</button>
+        <button type="button" data-v="dark">다크</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="credit" class="credit"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="overlay-root"></div>
+
+  <div id="splash" class="splash">
+    <div class="splash-card">
+      <div class="splash-ic">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s6.5-5.6 6.5-11a6.5 6.5 0 10-13 0c0 5.4 6.5 11 6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>
+      </div>
+      <h2>부산 상가지도</h2>
+      <p id="splash-txt">상가 데이터 불러오는 중…</p>
+      <div class="splash-track"><i id="splash-bar"></i></div>
+    </div>
+  </div>
+
+  <script src="vendor/maplibre-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
