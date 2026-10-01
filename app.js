@@ -110,7 +110,8 @@ const { chosung, isJamo } = __m_util;
 // 전체 데이터 (컬럼형 typed array)
 const D = {};
 // 활성 필터 (비어 있으면 전체)
-const filter = { subs: new Set(), dists: new Set() };
+const filter = { subs: new Set(), dists: new Set(), city: null };
+const catalog = {};
 
 // <script> 태그로 데이터 파일을 읽는다 (file:// 로 열어도 동작; fetch/XHR은 file:// 에서 차단됨)
 function loadScript(src) {
@@ -130,17 +131,33 @@ function loadScript(src) {
   });
 }
 
-async function loadData(onProgress) {
+async function loadData(onProgress, region = '26') {
   // 진행률은 알 수 없으므로 두 파일 단위로만 표시
   onProgress && onProgress(0);
-  await loadScript('data/meta.js');
+  if (!catalog.regions) {
+    await loadScript('data/regions.js');
+    Object.assign(catalog, window.STORE_REGIONS);
+    delete window.STORE_REGIONS;
+  }
+  const selected = catalog.regions.find((r) => r.code === region) || catalog.regions.find((r) => r.code === '26') || catalog.regions[0];
+  const basePath = `data/regions/${selected.code}`;
+  await loadScript(`${basePath}/meta.js`);
   onProgress && onProgress(0.15);
-  await loadScript('data/points.js');
+  await loadScript(`${basePath}/points.js`);
   onProgress && onProgress(0.9);
   const meta = window.BUSAN_META;
   const p = window.BUSAN_POINTS;
   delete window.BUSAN_META;
   delete window.BUSAN_POINTS;
+  for (const key of Object.keys(D)) delete D[key];
+  idMap = null;
+  shardCache.clear();
+  vpBuf = null;
+  filter.subs.clear();
+  filter.dists.clear();
+  filter.city = null;
+  D.basePath = basePath;
+  D.region = selected.code;
   D.meta = meta;
   D.cats = meta.cats;
   D.mids = meta.mids;
@@ -174,12 +191,13 @@ function applyFilter() {
   const out = new Uint32Array(D.n);
   let k = 0;
   for (let i = 0; i < D.n; i++) {
+    if (filter.city != null && D.dist[i] !== filter.city) continue;
     if (hs && !subOn[D.sub[i]]) continue;
     if (hd && !distOn[D.dist[i]]) continue;
     out[k++] = i;
   }
   D.F = out.subarray(0, k);
-  D.filtered = hs || hd;
+  D.filtered = hs || hd || filter.city != null;
 }
 
 let idMap;
@@ -231,6 +249,7 @@ function queryRadius(lon0, lat0, r, useFilter = true) {
   const dist = [];
   for (let k = 0; k < len; k++) {
     const i = src ? src[k] : k;
+    if (filter.city != null && D.dist[i] !== filter.city) continue;
     const x = D.lon[i];
     const y = D.lat[i];
     if (x < w || x > e || y < s || y > n) continue;
@@ -256,6 +275,7 @@ function search(q, limit = 40) {
     const qc = q.replace(/\s/g, '');
     D.cho ||= D.name.map(chosung);
     for (let i = 0; i < D.n && t0.length < limit; i++) {
+      if (filter.city != null && D.dist[i] !== filter.city) continue;
       const c = D.cho[i];
       if (c.startsWith(qc)) t0.push(i);
       else if (t1.length < limit && c.includes(qc)) t1.push(i);
@@ -264,6 +284,7 @@ function search(q, limit = 40) {
     const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
     const first = tokens[0];
     for (let i = 0; i < D.n && t0.length < limit; i++) {
+      if (filter.city != null && D.dist[i] !== filter.city) continue;
       const nl = D.nl[i];
       if (tokens.length === 1) {
         if (nl.startsWith(first)) t0.push(i);
@@ -291,7 +312,7 @@ function loadShard(d) {
   let p = shardCache.get(d);
   if (!p) {
     const code = D.dists[d].code;
-    p = loadScript(`data/detail/${code}.js`).then(() => {
+    p = loadScript(`${D.basePath}/detail/${code}.js`).then(() => {
       const s = window.BUSAN_DETAIL[code];
       delete window.BUSAN_DETAIL[code];
       s.byBldg = new Map();
@@ -321,7 +342,7 @@ async function getDetail(i) {
   const [hd, bd, land, bon, bu, rd, bNo, bName, zipNew, zipOld, floor, dongInfo, hoInfo, ks] = r;
   const bdong = s.b[bd];
   const road = s.r[rd];
-  let jibun = `부산광역시 ${dist.name} ${bdong[1]}`;
+  let jibun = `${D.meta.regionName} ${dist.name} ${bdong[1]}`;
   if (bon > 0) jibun += ` ${land === '2' ? '산 ' : ''}${bon}${bu ? '-' + bu : ''}`;
   const same = bNo ? (s.byBldg.get(bNo) || []).map((x) => x + dist.start).filter((j) => j !== i) : [];
   return {
@@ -342,7 +363,7 @@ async function getDetail(i) {
     sameBuilding: same,
   };
 }
-return { D, filter, loadData, applyFilter, indexOfId, metersFrom, queryBounds, queryRadius, search, loadShard, getDetail };
+return { D, filter, catalog, loadData, applyFilter, indexOfId, metersFrom, queryBounds, queryRadius, search, loadShard, getDetail };
 })();
 
 // ===== icons.js =====
@@ -499,7 +520,7 @@ const DARK = {
 let baseRaw = null;
 
 // 상세 팝업용 미니 지도 (조작 불가, 같은 스타일/팔레트)
-function createMiniMap(container, lon, lat) {
+function createMiniMap(container, lon, lat, options = {}) {
   let style;
   if (baseRaw) {
     const layers = JSON.parse(JSON.stringify(baseRaw.layers));
@@ -522,8 +543,8 @@ function createMiniMap(container, lon, lat) {
     style,
     center: [lon, lat],
     zoom: 16.8,
-    interactive: false,
-    attributionControl: false,
+    interactive: options.interactive ?? false,
+    attributionControl: options.attributionControl ?? false,
     fadeDuration: 0,
   });
 }
@@ -660,11 +681,11 @@ async function initMap(container, initial = {}) {
       style: buildStyle(base, state.dark),
       center: initial.center || HOME.center,
       zoom: initial.zoom ?? HOME.zoom,
-      minZoom: 8.5,
+      minZoom: 5.5,
       maxZoom: 19.5,
       maxBounds: [
-        [128.2, 34.6],
-        [129.8, 35.8],
+        [123.5, 32.5],
+        [132.5, 39.5],
       ],
       attributionControl: false,
       dragRotate: false,
@@ -755,6 +776,7 @@ function bindEvents() {
 
 // ---------- 데이터 ----------
 let allFC = null;
+let allRegion = null;
 function buildFC(F) {
   const feats = new Array(F.length);
   for (let k = 0; k < F.length; k++) {
@@ -765,6 +787,7 @@ function buildFC(F) {
 }
 
 function setShops(F, isAll) {
+  if (allRegion !== D.region) { allFC = null; allRegion = D.region; }
   const fc = isAll ? (allFC ||= buildFC(F)) : buildFC(F);
   map.getSource('shops').setData(fc);
 }
@@ -1050,7 +1073,7 @@ return { S, isFav, toggleFav, pushRecent, clearRecents };
 
 // ===== ui.js =====
 const __m_ui = (() => {
-const { D, filter, applyFilter, queryBounds, queryRadius, search, indexOfId, metersFrom } = __m_data;
+const { D, catalog, filter, applyFilter, queryBounds, queryRadius, search, indexOfId, metersFrom } = __m_data;
 const M = __m_map;
 const { openModal } = __m_modal;
 const { icon } = __m_icons;
@@ -1071,20 +1094,20 @@ let viewCats = null;
 let catSubs = [];
 
 function initUI() {
-  catSubs = D.cats.map(() => []);
-  D.subs.forEach((s, k) => catSubs[D.subCat[k]].push(k));
-
-  $('#sub').textContent = `부산광역시 · ${fmt(D.n)}개 상가`;
+  refreshRegionUI();
   renderChips();
   renderTabs();
   bindSearch();
   bindList();
   bindControls();
   initSheet();
+  $('#region-select').addEventListener('change', (e) => bus.emit('region-select', e.target.value));
+  $('#city-select').addEventListener('change', (e) => bus.emit('city-select', e.target.value));
 
   bus.on('move', debounce(refreshList, 140));
   bus.on('filter-changed', () => {
     renderChips();
+    syncRegionSelectors();
     refreshList();
   });
   bus.on('favs-changed', () => {
@@ -1100,6 +1123,25 @@ function initUI() {
     refreshList();
   });
   bus.on('credit', (t) => ($('#credit').textContent = t + ' · ' + D.meta.source));
+  refreshList();
+}
+
+function syncRegionSelectors() {
+  const city = filter.city == null ? null : D.dists[filter.city];
+  $('#sub').textContent = `${D.meta.regionName}${city ? ' · ' + city.name : ''} · ${fmt(city ? city.count : D.n)}개 상가`;
+  $('#region-select').value = D.region;
+  $('#city-select').value = city ? city.code : '';
+}
+
+function refreshRegionUI() {
+  catSubs = D.cats.map(() => []);
+  D.subs.forEach((s, k) => catSubs[D.subCat[k]].push(k));
+  $('#region-select').innerHTML = catalog.regions.map((r) => `<option value="${esc(r.code)}">${esc(r.name)}</option>`).join('');
+  $('#city-select').innerHTML = '<option value="">전체 시·군·구</option>' + D.dists.map((d) => `<option value="${esc(d.code)}">${esc(d.name)} (${fmt(d.count)})</option>`).join('');
+  syncRegionSelectors();
+  resetSearch();
+  renderChips();
+  renderTabs();
   refreshList();
 }
 
@@ -1217,7 +1259,7 @@ function refreshList() {
     summary.hidden = true;
     banner.hidden = true;
     const ids = S.tab === 'fav' ? [...S.favs] : S.recents;
-    items = ids.map((id) => indexOfId(id)).filter((i) => i != null);
+    items = ids.map((id) => indexOfId(id)).filter((i) => i != null && (filter.city == null || D.dist[i] === filter.city));
     itemDist = items.map((i) => metersFrom(i, c.lng, c.lat));
     const head =
       S.tab === 'recent' && items.length ? `<div class="list-head"><span>최근 본 상가 ${items.length}곳</span><button type="button" data-clear-recent>기록 지우기</button></div>` : '';
@@ -1352,7 +1394,7 @@ function exportCSV() {
         D.cats[D.cat[i]].name,
         D.mids[sub.mid].name,
         sub.name,
-        '부산광역시 ' + D.addr[i],
+        D.addr[i],
         D.dists[D.dist[i]].name,
         D.lon[i],
         D.lat[i],
@@ -1365,7 +1407,7 @@ function exportCSV() {
   const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `busan_shops_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`;
+  a.download = `shops_${D.region}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -1447,7 +1489,7 @@ function showSearch(v) {
   }
   results = search(v, 40);
   active = -1;
-  const distHits = D.dists.map((d, k) => [d, k]).filter(([d]) => d.name.includes(v)).slice(0, 3);
+  const distHits = D.dists.map((d, k) => [d, k]).filter(([d, k]) => d.name.includes(v) && (filter.city == null || filter.city === k)).slice(0, 3);
   let html = distHits
     .map(
       ([d, k]) =>
@@ -1661,7 +1703,7 @@ function openFilter() {
   const paint = () => {
     tree.innerHTML = treeHTML();
     pills.innerHTML = D.dists
-      .map((d, k) => `<button type="button" class="pill${filter.dists.has(k) ? ' on' : ''}" data-d="${k}">${esc(d.name)}<small>${fmt(d.count)}</small></button>`)
+      .map((d, k) => filter.city != null && filter.city !== k ? '' : `<button type="button" class="pill${filter.dists.has(k) || filter.city === k ? ' on' : ''}" data-d="${k}">${esc(d.name)}<small>${fmt(d.count)}</small></button>`)
       .join('');
     done.textContent = `${fmt(D.F.length)}개 상가 보기`;
     $$('#f-rad [data-r]', m.scroll).forEach((b) => b.classList.toggle('on', +b.dataset.r === rad));
@@ -1727,21 +1769,348 @@ function openFilter() {
     row.querySelector('.exp').classList.toggle('open', expanded.has(key));
   });
 }
-return { initUI, renderChips, refreshList, syncPop, setDetent, openFilter };
+return { initUI, refreshRegionUI, renderChips, refreshList, syncPop, setDetent, openFilter };
+})();
+
+// ===== routing.js =====
+const __m_routing = (() => {
+const { createMiniMap } = __m_map;
+
+function createRouteView(container, destination) {
+  const map = createMiniMap(container, destination.lon, destination.lat, { interactive: true, attributionControl: true });
+  let ready = false;
+  let route = null;
+  let origin = null;
+  let markers = [];
+  function marker(point, text, color) {
+    const element = document.createElement('span');
+    element.className = 'route-pin';
+    element.textContent = text;
+    element.style.background = color;
+    element.setAttribute('aria-label', `${text}: ${point.name}`);
+    return new window.maplibregl.Marker({ element }).setLngLat([point.lon, point.lat]).addTo(map);
+  }
+  function draw() {
+    if (!ready) return;
+    markers.forEach((m) => m.remove());
+    markers = [marker(destination, '도착', '#FF3B30')];
+    if (origin) markers.push(marker(origin, '출발', '#007AFF'));
+    const geo = route?.geometry || { type: 'FeatureCollection', features: [] };
+    map.getSource('route').setData(geo);
+    const coordinates = geo.features.flatMap((f) => f.geometry.coordinates);
+    map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+    if (coordinates.length) {
+      const bounds = new window.maplibregl.LngLatBounds();
+      coordinates.forEach((p) => bounds.extend(p));
+      if (origin) bounds.extend([origin.lon, origin.lat]);
+      bounds.extend([destination.lon, destination.lat]);
+      map.fitBounds(bounds, { padding: 44, maxZoom: 17, duration: 450, essential: true });
+    } else if (origin) {
+      const bounds = new window.maplibregl.LngLatBounds();
+      bounds.extend([origin.lon, origin.lat]);
+      bounds.extend([destination.lon, destination.lat]);
+      map.fitBounds(bounds, { padding: 44, maxZoom: 16, duration: 300, essential: true });
+    }
+  }
+  map.on('load', () => {
+    map.addSource('route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+    map.addLayer({ id: 'route-border', type: 'line', source: 'route', paint: { 'line-color': '#fff', 'line-width': 8, 'line-opacity': 0.85 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+    map.addLayer({ id: 'route-line', type: 'line', source: 'route', filter: ['!=', ['get', 'mode'], 'WALK'],
+      paint: { 'line-color': ['get', 'color'], 'line-width': 5 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+    map.addLayer({ id: 'route-walk', type: 'line', source: 'route', filter: ['==', ['get', 'mode'], 'WALK'],
+      paint: { 'line-color': ['get', 'color'], 'line-width': 5, 'line-dasharray': [1, 1.3] }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+    ready = true;
+    draw();
+  });
+  return {
+    show(nextRoute, nextOrigin) { route = nextRoute; origin = nextOrigin; draw(); },
+    destroy() { markers.forEach((m) => m.remove()); map.remove(); },
+  };
+}
+return { createRouteView };
+})();
+
+// ===== directions.js =====
+const __m_directions = (() => {
+const { D, search } = __m_data;
+const { openModal } = __m_modal;
+const { esc } = __m_util;
+const { icon } = __m_icons;
+const { createRouteView } = __m_routing;
+
+function routeURLs(destination, origin, mode = 'car', address = '') {
+  const point = (p) => `${encodeURIComponent(p.name.replace(/,/g, ' '))},${p.lat},${p.lon}`;
+  const kakao = origin
+    ? `https://map.kakao.com/link/by/${mode}/${point(origin)}/${point(destination)}`
+    : `https://map.kakao.com/link/to/${point(destination)}`;
+  const params = new URLSearchParams({ api: '1', destination: `${destination.lat},${destination.lon}`,
+    travelmode: { car: 'driving', traffic: 'transit', walk: 'walking', bicycle: 'bicycling' }[mode] });
+  if (origin) params.set('origin', `${origin.lat},${origin.lon}`);
+  else if (address.trim()) params.set('origin', address.trim());
+  return { kakao, google: 'https://www.google.com/maps/dir/?' + params };
+}
+
+function openDirections(i) {
+  const destination = { name: D.name[i], lat: D.lat[i], lon: D.lon[i] };
+  let origin = null;
+  let mode = 'car';
+  let alive = true;
+  let locating = false;
+  let request = null;
+  let routeView = null;
+  let response = null;
+  const cache = new Map();
+  const m = openModal({ className: 'directions', onClose: () => { alive = false; request?.abort(); routeView?.destroy(); } });
+  m.scroll.innerHTML = `<div class="f-head"><h2>길찾기</h2></div>
+    <section class="group"><h3>도착지</h3><div class="card">
+      <div class="r stack"><span class="r-l">${esc(destination.name)}</span><span class="r-v">${esc(D.addr[i])}</span></div></div></section>
+    <section class="group"><h3>출발지</h3><div class="card route-form">
+      <button class="btn" type="button" data-route="locate">${icon('locate')}현재 위치 사용</button>
+      <label for="route-origin">출발 상가명 · 주소</label>
+      <input id="route-origin" type="search" placeholder="출발할 상가나 주소를 검색하세요" autocomplete="off" maxlength="200">
+      <div class="route-results"></div>
+      <p class="route-status" role="status" aria-live="polite">현재 위치를 사용하거나 목록에서 출발 상가를 선택해 주세요.</p>
+    </div></section>
+    <section class="group"><h3>이동 수단</h3><div class="seg route-modes" role="group" aria-label="이동 수단">
+      ${[['car', '자동차'], ['walk', '도보'], ['traffic', '대중교통']].map(([k, label]) => `<button type="button" data-mode="${k}" class="${k === mode ? 'on' : ''}" aria-pressed="${k === mode}">${label}</button>`).join('')}
+    </div></section>
+    <section class="group"><button type="button" class="primary" data-route="search" disabled>경로 찾기</button></section>
+    <section class="group"><h3>경로 지도</h3><div class="card"><div class="route-map" role="region" aria-label="길찾기 경로 지도"></div></div></section>
+    <div class="route-output" aria-live="polite"><p class="place-message">출발지를 선택하면 웹 안에서 경로를 확인할 수 있어요.</p></div>
+    <section class="group"><h3>지도 앱에서도 보기</h3><div class="card linkrow">
+      <a data-provider="kakao" target="_blank" rel="noopener noreferrer"><i style="background:#FEE500;color:#191919">K</i>카카오맵 길찾기${icon('ext')}</a>
+      <a data-provider="google" target="_blank" rel="noopener noreferrer"><i style="background:#4285F4;color:#fff">G</i>구글지도 길찾기${icon('ext')}</a>
+    </div><p class="hint route-hint"></p></section><p class="foot">경로 정보: TMAP · 실제 이동 시간은 교통 상황과 운행 시간에 따라 달라질 수 있어요.</p>`;
+  const input = m.scroll.querySelector('#route-origin');
+  const results = m.scroll.querySelector('.route-results');
+  const status = m.scroll.querySelector('.route-status');
+  const searchButton = m.scroll.querySelector('[data-route="search"]');
+  const output = m.scroll.querySelector('.route-output');
+  routeView = createRouteView(m.scroll.querySelector('.route-map'), destination);
+  const labels = { car: '자동차', walk: '도보', traffic: '대중교통' };
+  const modes = { WALK: '도보', CAR: '자동차', BUS: '버스', SUBWAY: '지하철', TRAIN: '기차', EXPRESSBUS: '고속·시외버스', AIRPLANE: '항공', FERRY: '배' };
+  const time = (seconds) => {
+    if (seconds == null) return '시간 미제공';
+    const minutes = Math.ceil(seconds / 60);
+    return minutes >= 60 ? `${Math.floor(minutes / 60)}시간 ${minutes % 60}분` : `${minutes}분`;
+  };
+  const distance = (meters) => meters == null ? '거리 미제공' : meters < 1000 ? `${Math.round(meters)}m` : `${(meters / 1000).toFixed(1)}km`;
+  function cancel() { request?.abort(); request = null; response = null; routeView.show(null, origin); }
+  function showRoute(index) {
+    const route = response.routes[index];
+    routeView.show(route, origin);
+    output.innerHTML = `<section class="group"><h3>${labels[mode]} 경로</h3><div class="card">
+      ${response.routes.length > 1 ? `<div class="route-alternatives">${response.routes.map((r, k) => `<button type="button" class="route-option${k === index ? ' on' : ''}" data-route-index="${k}" aria-pressed="${k === index}"><b>${k === 0 ? '추천 경로' : '경로 ' + (k + 1)}</b><span>${time(r.duration)} · ${distance(r.distance)}</span></button>`).join('')}</div>` : ''}
+      <div class="route-summary"><strong>${time(route.duration)}</strong><span>${distance(route.distance)}</span>
+        ${route.transfers != null ? `<span>환승 ${route.transfers}회</span>` : ''}
+        ${route.fare != null ? `<span>교통비 ${route.fare.toLocaleString('ko-KR')}원</span>` : ''}
+        ${route.toll != null ? `<span>통행료 ${route.toll.toLocaleString('ko-KR')}원</span>` : ''}
+        ${route.walkDistance != null ? `<span>도보 ${distance(route.walkDistance)}</span>` : ''}
+      </div>
+      ${route.geometry.features.length ? '' : '<p class="place-message">경로 선이 제공되지 않아 이동 안내만 표시해요.</p>'}
+      <ol class="route-steps">${route.steps.map((step) => `<li><div><span class="route-step-mode">${esc(modes[step.mode] || step.mode)}</span>${step.duration != null ? `<small>${time(step.duration)}</small>` : ''}</div><p>${esc(step.instruction)}</p>
+        ${step.service === 0 ? '<small class="route-service-warning">현재 운행이 종료된 구간이에요.</small>' : ''}
+        ${step.stops?.length ? `<details><summary>정류장 ${step.stops.length}곳</summary><p>${esc(step.stops.join(' → '))}</p></details>` : ''}
+        ${step.details?.length ? `<details><summary>도보 상세 안내</summary>${step.details.map((text) => `<p>${esc(text)}</p>`).join('')}</details>` : ''}</li>`).join('')}</ol>
+      <p class="place-message">${esc(response.source)} 제공</p></div></section>`;
+  }
+  async function findRoute() {
+    if (!origin) { status.textContent = '목록에서 출발지를 선택해 주세요.'; return; }
+    cancel();
+    const selectedMode = mode;
+    const key = `${origin.lon},${origin.lat},${mode}`;
+    if (cache.has(key)) { response = cache.get(key); showRoute(0); return; }
+    const controller = new AbortController();
+    request = controller;
+    searchButton.disabled = true;
+    output.innerHTML = `<section class="group"><h3>${labels[mode]} 경로</h3><div class="card"><div class="shimmer"></div><p class="place-message">실제 경로를 검색하고 있어요…</p></div></section>`;
+    try {
+      if (location.protocol === 'file:') throw new Error('웹 서버로 접속하면 내장 길찾기를 사용할 수 있어요.');
+      const result = await fetch('/api/route', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, origin, id: D.id[i], region: D.region }), signal: controller.signal });
+      const data = await result.json();
+      if (!result.ok) throw new Error(data.message || '경로를 불러오지 못했어요.');
+      if (!alive || controller.signal.aborted || mode !== selectedMode) return;
+      cache.set(key, data);
+      response = data;
+      showRoute(0);
+    } catch (error) {
+      if (!alive || controller.signal.aborted) return;
+      output.innerHTML = `<section class="group"><h3>${labels[selectedMode]} 경로</h3><div class="card"><p class="place-message">${esc(error.message)}</p></div></section>`;
+    } finally { if (alive && request === controller) { request = null; searchButton.disabled = !origin; } }
+  }
+  function update() {
+    const urls = routeURLs(destination, origin, mode, input.value);
+    searchButton.disabled = !origin;
+    for (const provider of ['kakao', 'google']) m.scroll.querySelector(`[data-provider="${provider}"]`).href = urls[provider];
+    m.scroll.querySelector('.route-hint').textContent = origin ? '선택한 출발지와 이동 수단으로 경로를 열어요.'
+      : input.value.trim() ? '입력한 주소는 구글지도에 전달돼요. 카카오맵에서는 출발지와 이동 수단을 선택해 주세요.'
+      : '출발지를 지정하지 않으면 지도 앱에서 출발지와 이동 수단을 선택할 수 있어요.';
+  }
+  input.addEventListener('input', () => {
+    origin = null;
+    cancel();
+    output.innerHTML = '<p class="place-message">검색 결과에서 출발 상가를 선택해 주세요.</p>';
+    const query = input.value.trim();
+    results.innerHTML = query ? search(query, 5).map((j) => `<button type="button" class="route-result" data-origin="${j}"><b>${esc(D.name[j])}</b><small>${esc(D.addr[j])}</small></button>`).join('') : '';
+    status.textContent = query ? '검색 결과에서 출발 상가를 선택해 주세요.' : '현재 위치를 사용하거나 출발 상가를 검색해 주세요.';
+    update();
+  });
+  m.scroll.addEventListener('click', (e) => {
+    const result = e.target.closest('[data-origin]');
+    if (result) {
+      const j = +result.dataset.origin;
+      origin = { name: D.name[j], lat: D.lat[j], lon: D.lon[j] };
+      input.value = origin.name;
+      results.innerHTML = '';
+      status.textContent = '출발지: ' + D.addr[j];
+      cancel();
+      output.innerHTML = '<p class="place-message">이동 수단을 선택하고 경로 찾기를 눌러 주세요.</p>';
+      update();
+    }
+    const button = e.target.closest('[data-mode]');
+    if (button) {
+      const hadRoute = !!response;
+      cancel();
+      mode = button.dataset.mode;
+      m.scroll.querySelectorAll('[data-mode]').forEach((b) => {
+        b.classList.toggle('on', b === button);
+        b.setAttribute('aria-pressed', String(b === button));
+      });
+      update();
+      output.innerHTML = '<p class="place-message">' + labels[mode] + ' 경로 찾기를 눌러 주세요.</p>';
+      if (hadRoute && origin) findRoute();
+    }
+    const alternative = e.target.closest('[data-route-index]');
+    if (alternative && response) showRoute(+alternative.dataset.routeIndex);
+    if (e.target.closest('[data-route="search"]')) findRoute();
+    const locate = e.target.closest('[data-route="locate"]');
+    if (!locate || locating) return;
+    if (!navigator.geolocation) { status.textContent = '위치를 지원하지 않는 브라우저예요. 출발 주소를 입력해 주세요.'; return; }
+    locating = true;
+    locate.disabled = true;
+    status.textContent = '현재 위치를 확인하고 있어요…';
+    navigator.geolocation.getCurrentPosition((position) => {
+      if (!alive) return;
+      locating = false;
+      locate.disabled = false;
+      origin = { name: '현재 위치', lat: position.coords.latitude, lon: position.coords.longitude };
+      input.value = '현재 위치';
+      results.innerHTML = '';
+      status.textContent = '현재 위치를 출발지로 설정했어요.';
+      cancel();
+      output.innerHTML = '<p class="place-message">이동 수단을 선택하고 경로 찾기를 눌러 주세요.</p>';
+      update();
+    }, (error) => {
+      if (!alive) return;
+      locating = false;
+      locate.disabled = false;
+      status.textContent = error.code === 1 ? '위치 권한이 꺼져 있어요. 출발 주소를 직접 입력할 수 있어요.' : '현재 위치를 확인하지 못했어요. 출발 주소를 입력해 주세요.';
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+  });
+  update();
+}
+return { routeURLs, openDirections };
+})();
+
+// ===== place.js =====
+const __m_place = (() => {
+const { D } = __m_data;
+const { esc } = __m_util;
+const { icon } = __m_icons;
+
+const group = (title, content) => `<section class="group"><h3>${title}</h3><div class="card">${content}</div></section>`;
+const message = (text) => `<p class="place-message">${esc(text)}</p>`;
+function reviewDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(value || '')) return value || '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
+}
+function safeURL(value) {
+  try { const u = new URL(value); return u.protocol === 'https:' ? u.href : ''; } catch { return ''; }
+}
+function link(url, label) {
+  const href = safeURL(url);
+  return href ? `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(label)}${icon('ext')}</a>` : '';
+}
+
+function placeLoading(i) {
+  return group('리뷰', '<div class="shimmer"></div><div class="shimmer w70"></div><p class="place-message">실제 리뷰를 불러오는 중… 첫 수집은 최대 3분 정도 걸릴 수 있어요.</p>') +
+    (D.cats[D.cat[i]].code === 'I2' ? group('메뉴', '<div class="shimmer"></div>') : '');
+}
+
+async function fillPlace(i, slot, signal, retry = false) {
+  const food = D.cats[D.cat[i]].code === 'I2';
+  const fallback = `<div class="linkrow">${link('https://map.naver.com/p/search/' + encodeURIComponent(D.addr[i] + ' ' + D.name[i]), food ? '네이버지도에서 리뷰·메뉴 확인' : '네이버지도에서 리뷰 확인')}</div>`;
+  try {
+    if (location.protocol === 'file:') throw new Error('서버로 접속하면 리뷰를 자동으로 불러올 수 있어요. 지금은 지도에서 리뷰를 확인할 수 있어요.');
+    const endpoint = '/api/place?' + new URLSearchParams({ id: D.id[i], region: D.region });
+    const started = Date.now();
+    let data;
+    while (true) {
+      const response = await fetch(endpoint + (retry ? '&retry=1' : ''), { signal, cache: 'no-store' });
+      retry = false;
+      data = await response.json();
+      if (!response.ok) throw new Error(data.message || '리뷰를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+      if (data.status !== 'pending') break;
+      if (Date.now() - started > 210000) throw new Error('리뷰 수집이 지연되고 있어요. 잠시 후 다시 불러와 주세요.');
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve(); }, 2500);
+        const abort = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); };
+        signal.addEventListener('abort', abort, { once: true });
+        if (signal.aborted) abort();
+      });
+    }
+    if (signal.aborted) return;
+    if (data.status === 'not_found') {
+      slot.innerHTML = group('리뷰', message('이 주소와 일치하는 상가의 리뷰를 찾지 못했어요.') + fallback) + (food ? group('메뉴', message('메뉴 원본을 지도에서 확인해 주세요.')) : '');
+      return;
+    }
+    const reviews = data.reviews || [];
+    const reviewHTML = reviews.map((r, index) => `<article class="review"${index >= 3 ? ' hidden' : ''}>
+      <div class="review-head"><b>${safeURL(r.authorUrl) ? `<a href="${esc(safeURL(r.authorUrl))}" target="_blank" rel="noopener noreferrer">${esc(r.author || 'Google Maps 사용자')}</a>` : esc(r.author || 'Google Maps 사용자')}</b><span class="review-rating">★ ${esc(r.rating ?? '—')}</span></div>
+      <p class="review-date">${esc(reviewDate(r.date))}</p><p class="review-text">${esc(r.text || '내용 없이 별점만 남긴 리뷰예요.')}</p>
+      ${link(r.url, '리뷰 원문 보기')}
+    </article>`).join('');
+    slot.innerHTML = group('리뷰', `<div class="review-summary"><strong>★ ${esc(data.rating ?? '—')}</strong><span>평가 ${esc((data.reviewCount || 0).toLocaleString('ko-KR'))}개</span></div>
+      ${reviewHTML || message('공개된 리뷰가 아직 없어요.')}
+      ${reviews.length > 3 ? `<button type="button" class="link-btn" data-act="more-reviews">리뷰 ${reviews.length - 3}개 더 보기${icon('chevR')}</button>` : ''}
+      <div class="place-attribution"><span translate="no">Google Maps</span><small>Apify 수집 · 최신순 · 최대 20개</small></div>
+      ${(data.attributions || []).map((a) => `<p class="place-message">${link(a.uri, a.provider) || esc(a.provider)}</p>`).join('')}
+      <div class="linkrow">${link(data.mapsUrl, 'Google Maps에서 전체 리뷰 보기')}</div>`) +
+      (food ? group('메뉴', renderMenu(data.menu) + fallback) : '');
+  } catch (error) {
+    if (signal.aborted) return;
+    slot.innerHTML = group('리뷰', message(error.message) + '<button type="button" class="link-btn" data-act="retry-place">다시 불러오기</button>' + fallback) +
+      (food ? group('메뉴', message('메뉴가 제공되는 음식점은 공식 홈페이지의 메뉴를 표시해요.')) : '');
+  }
+}
+
+function renderMenu(menu = {}) {
+  const items = menu.items || [];
+  return (items.length ? items.map((item) => `<div class="r menu-row"><span class="menu-name">${esc(item.name)}${item.description ? `<small>${esc(item.description)}</small>` : ''}</span><span class="r-v">${esc(item.price || '가격 미공개')}</span></div>`).join('')
+    : message(menu.status === 'unavailable' ? '공식 홈페이지의 메뉴를 불러오지 못했어요.' : '이 음식점은 자동으로 가져올 수 있는 메뉴 항목을 공개하지 않았어요. 원본에서 확인해 주세요.')) +
+    (menu.sourceUrl ? `<div class="linkrow">${link(menu.sourceUrl, items.length ? '메뉴 출처에서 확인' : '메뉴 원본에서 확인')}</div>` : '') +
+    (items.length ? '<p class="place-message">공식 홈페이지에 공개된 메뉴와 가격이에요. 실제 판매 가격은 매장에서 확인해 주세요.</p>' : '');
+}
+return { placeLoading, fillPlace };
 })();
 
 // ===== detail.js =====
 const __m_detail = (() => {
-const { D, getDetail, queryRadius } = __m_data;
+const { D, filter, getDetail, queryRadius } = __m_data;
 const { openModal } = __m_modal;
 const { icon, iconPath } = __m_icons;
 const { rowHTML } = __m_rows;
 const { isFav, toggleFav } = __m_state;
 const { createMiniMap } = __m_map;
 const { esc, fmt, fmtDist, copyText, toast, bus } = __m_util;
+const { openDirections } = __m_directions;
+const { placeLoading, fillPlace } = __m_place;
 
 let cur = null; // { m, i }
 let token = 0;
+let placeRequest = null;
 
 function openDetail(i) {
   if (!cur) {
@@ -1750,6 +2119,7 @@ function openDetail(i) {
       onClose: () => {
         cur = null;
         token++;
+        placeRequest?.abort();
         destroyMini();
         bus.emit('detail-closed');
       },
@@ -1820,6 +2190,7 @@ function mountMini(i) {
 // ---------- 렌더 ----------
 function render(i) {
   const my = ++token;
+  placeRequest?.abort();
   const m = cur.m;
   const cat = D.cats[D.cat[i]];
   const sub = D.subs[D.sub[i]];
@@ -1828,7 +2199,7 @@ function render(i) {
   const lon = D.lon[i];
   const lat = D.lat[i];
   const dist = D.dists[D.dist[i]];
-  const fullAddr = '부산광역시 ' + D.addr[i];
+  const fullAddr = D.addr[i];
   const fav = isFav(D.id[i]);
   const nm = encodeURIComponent(D.name[i].replace(/,/g, ' '));
 
@@ -1847,7 +2218,7 @@ function render(i) {
     </div>
 
     <div class="actions">
-      <a class="act" href="https://map.kakao.com/link/to/${nm},${lat},${lon}" target="_blank" rel="noopener">${icon('route')}<span>길찾기</span></a>
+      <button class="act" type="button" data-act="directions">${icon('route')}<span>길찾기</span></button>
       <button class="act" type="button" data-act="radius">${icon('radius')}<span>주변 검색</span></button>
       <button class="act" type="button" data-act="copy-addr">${icon('copy')}<span>주소 복사</span></button>
       <button class="act" type="button" data-act="share">${icon('share')}<span>공유</span></button>
@@ -1855,6 +2226,8 @@ function render(i) {
     </div>
 
     ${miniMap()}
+
+    <div id="slot-place" aria-live="polite">${placeLoading(i)}</div>
 
     <div id="slot-detail">${group('위치', '<div class="shimmer"></div><div class="shimmer w70"></div><div class="shimmer w50"></div>')}</div>
     <div id="slot-nearby"></div>
@@ -1874,6 +2247,7 @@ function render(i) {
   `;
   m.scroll.scrollTop = 0;
   mountMini(i);
+  loadPlace(i);
 
   // 주변 통계는 동기 계산(수 ms)이지만 첫 페인트 후에
   setTimeout(() => {
@@ -1893,6 +2267,14 @@ function render(i) {
     });
 }
 
+function loadPlace(i, retry = false) {
+  placeRequest?.abort();
+  placeRequest = new AbortController();
+  const slot = cur.m.scroll.querySelector('#slot-place');
+  slot.innerHTML = placeLoading(i);
+  fillPlace(i, slot, placeRequest.signal, retry);
+}
+
 function fillDetail(i, d) {
   const m = cur.m;
   const cat = D.cats[D.cat[i]];
@@ -1904,7 +2286,7 @@ function fillDetail(i, d) {
   m.scroll.querySelector('#slot-detail').innerHTML =
     group(
       '위치',
-      row('도로명주소', '부산광역시 ' + D.addr[i], { stack: true, copy: true }) +
+      row('도로명주소', D.addr[i], { stack: true, copy: true }) +
         row('지번주소', d.jibun, { stack: true, copy: true }) +
         row('건물명', d.bldgName) +
         row('동', d.dongInfo) +
@@ -1973,6 +2355,7 @@ function fillNearby(i) {
   const kx = 111320 * Math.cos((lat0 * Math.PI) / 180);
   const best = [];
   for (let j = 0; j < D.n; j++) {
+    if (filter.city != null && D.dist[j] !== filter.city) continue;
     if (D.sub[j] !== sub || j === i) continue;
     const d = Math.hypot((D.lon[j] - lon0) * kx, (D.lat[j] - lat0) * 110540);
     if (best.length < 6 || d < best[best.length - 1][1]) {
@@ -2024,6 +2407,16 @@ function onClick(e) {
   const act = e.target.closest('[data-act]');
   if (!act) return;
   switch (act.dataset.act) {
+    case 'directions':
+      openDirections(i);
+      break;
+    case 'retry-place':
+      loadPlace(i, true);
+      break;
+    case 'more-reviews':
+      cur.m.scroll.querySelectorAll('.review[hidden]').forEach((review) => { review.hidden = false; });
+      act.remove();
+      break;
     case 'fav': {
       const on = toggleFav(D.id[i]);
       act.classList.toggle('on', on);
@@ -2032,12 +2425,14 @@ function onClick(e) {
       break;
     }
     case 'copy-addr':
-      copyText('부산광역시 ' + D.addr[i] + ' ' + D.name[i], '주소를 복사했어요');
+      copyText(D.addr[i] + ' ' + D.name[i], '주소를 복사했어요');
       break;
     case 'share': {
-      const url = location.href.split('#')[0] + '#shop=' + encodeURIComponent(D.id[i]);
+      const params = new URLSearchParams({ r: D.region, shop: D.id[i] });
+      if (filter.city != null) params.set('c', D.dists[filter.city].code);
+      const url = location.href.split('#')[0] + '#' + params;
       if (navigator.share) {
-        navigator.share({ title: D.name[i], text: '부산광역시 ' + D.addr[i], url }).catch(() => {});
+        navigator.share({ title: D.name[i], text: D.addr[i], url }).catch(() => {});
       } else copyText(url, '링크를 복사했어요');
       break;
     }
@@ -2067,7 +2462,7 @@ return { openDetail, closeDetail, currentDetail };
 const __m_main = (() => {
 const { D, loadData, filter, applyFilter, indexOfId } = __m_data;
 const M = __m_map;
-const { initUI, renderChips, syncPop, setDetent } = __m_ui;
+const { initUI, refreshRegionUI, renderChips, syncPop, setDetent } = __m_ui;
 const { openDetail, closeDetail } = __m_detail;
 const { S, pushRecent } = __m_state;
 const { $, bus, debounce, store, toast, fmt } = __m_util;
@@ -2130,6 +2525,8 @@ const updateHash = debounce(() => {
   if (!M.map) return;
   const c = M.map.getCenter();
   const p = new URLSearchParams();
+  p.set('r', D.region);
+  if (filter.city != null) p.set('c', D.dists[filter.city].code);
   p.set('map', `${M.map.getZoom().toFixed(2)}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`);
   if (S.sel != null) p.set('shop', D.id[S.sel]);
   const f = encodeFilter();
@@ -2148,6 +2545,8 @@ function parseHash() {
 
 function applyHashState(h) {
   const p = h.p;
+  const city = D.dists.findIndex((d) => d.code === p.get('c'));
+  filter.city = city >= 0 ? city : null;
   decodeFilter(p.get('s') || '');
   filter.dists.clear();
   (p.get('d') || '')
@@ -2187,9 +2586,79 @@ bus.on('move', updateHash);
 // ---------- 지역 이동 ----------
 bus.on('goto-dist', (k) => {
   const d = D.dists[k];
-  M.flyTo(d.center[0], d.center[1], 12.6);
+  selectCity(d.code);
   if (isMobile()) setDetent('half');
 });
+
+let switchingRegion = false;
+function fitRegion(bounds) {
+  // MapLibre adds fitBounds padding to the current camera padding.
+  // Reset it first so the sidebar inset is applied only once.
+  M.map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
+  const width = M.map.getContainer().clientWidth;
+  const height = M.map.getContainer().clientHeight;
+  M.map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], {
+    padding: isMobile() ? { top: 90, bottom: Math.min(220, height * 0.32), left: 24, right: 24 } : { top: 40, bottom: 40, left: Math.min(440, width * 0.55), right: 24 },
+    maxZoom: 13, duration: 700, essential: true,
+  });
+}
+function selectCity(code) {
+  if (switchingRegion) return;
+  closeDetail();
+  S.sel = null;
+  S.radius = null;
+  M.setSelected(null);
+  M.setRadius(null);
+  const city = D.dists.findIndex((d) => d.code === code);
+  filter.city = city >= 0 ? city : null;
+  filter.dists.clear();
+  applyFilter();
+  refreshRegionUI();
+  bus.emit('filter-changed');
+  fitRegion(city >= 0 ? D.dists[city].bounds : D.meta.bounds);
+  updateHash();
+}
+async function changeRegion(region, hashState = null) {
+  if (switchingRegion) return;
+  if (region === D.region) { if (!hashState) selectCity(''); return; }
+  switchingRegion = true;
+  closeDetail();
+  const previous = D.region;
+  const selectors = [$('#region-select'), $('#city-select')];
+  selectors.forEach((el) => el.disabled = true);
+  $('#sidebar').inert = true;
+  $('#map').inert = true;
+  $('#region-status').textContent = '선택한 지역의 상가를 불러오는 중…';
+  try {
+    await loadData(null, region);
+    S.sel = null;
+    S.radius = null;
+    S.tab = 'view';
+    M.setSelected(null);
+    M.setRadius(null);
+    if (hashState) applyHashState(hashState);
+    M.setShops(D.F, !D.filtered);
+    refreshRegionUI();
+    bus.emit('filter-changed');
+    if (hashState?.view) M.map.jumpTo(hashState.view);
+    else fitRegion(filter.city != null ? D.dists[filter.city].bounds : D.meta.bounds);
+    const id = hashState?.p.get('shop');
+    if (id) { const i = indexOfId(id); if (i != null) selectShop(i); }
+    store.set('shops-region', D.region);
+    $('#region-status').textContent = '';
+    updateHash();
+  } catch (error) {
+    $('#region-select').value = previous;
+    $('#region-status').textContent = '지역 데이터를 불러오지 못했어요. 다시 선택해 주세요.';
+  } finally {
+    switchingRegion = false;
+    selectors.forEach((el) => el.disabled = false);
+    $('#sidebar').inert = false;
+    $('#map').inert = false;
+  }
+}
+bus.on('region-select', (region) => changeRegion(region));
+bus.on('city-select', selectCity);
 
 // ---------- 필터 ----------
 bus.on('filter-changed', () => {
@@ -2234,8 +2703,7 @@ function locate() {
         const { longitude: lon, latitude: lat } = pos.coords;
         const b = D.meta.bounds;
         if (lon < b[0] - 0.15 || lon > b[2] + 0.15 || lat < b[1] - 0.15 || lat > b[3] + 0.15) {
-          toast('현재 위치가 부산 지도 범위 밖이에요');
-          return resolve(null);
+          toast('현재 위치는 선택한 지역 밖이에요. 해당 시·도를 선택하면 상가를 볼 수 있어요');
         }
         S.user = { lon, lat };
         M.showUser(lon, lat);
@@ -2280,8 +2748,9 @@ document.addEventListener('keydown', (e) => {
 
 // ---------- 부트 ----------
 async function boot() {
+  const h = parseHash();
   try {
-    await loadData(setSplash);
+    await loadData(setSplash, h.p.get('r') || store.get('shops-region', '26'));
   } catch (err) {
     console.error(err);
     $('#splash-txt').innerHTML =
@@ -2289,13 +2758,13 @@ async function boot() {
     $('#splash-bar').parentElement.hidden = true;
     return;
   }
-  const h = parseHash();
   applyHashState(h);
   await M.initMap('map', { ...h.view, dark: S.dark, basemap: view.basemap });
   M.setShops(D.F, !D.filtered);
   syncPop({ ...view });
   initUI();
   renderChips();
+  if (!h.view) fitRegion(filter.city != null ? D.dists[filter.city].bounds : D.meta.bounds);
 
   const shopId = h.p.get('shop');
   if (shopId) {
@@ -2306,10 +2775,11 @@ async function boot() {
   window.__app = { D, M, S }; // 디버깅 편의
 }
 
-window.addEventListener('hashchange', () => {
+window.addEventListener('hashchange', async () => {
   // 외부에서 해시가 바뀐 경우(공유 링크 붙여넣기 등)
   const h = parseHash();
   if (!D.n) return;
+  if (h.p.get('r') && h.p.get('r') !== D.region) { await changeRegion(h.p.get('r'), h); return; }
   applyHashState(h);
   M.setShops(D.F, !D.filtered);
   renderChips();

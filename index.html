@@ -5,23 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
   <meta name="theme-color" content="#f2f2f7">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="description" content="부산광역시 상가(상권) 정보를 지도에서 검색하고 상세 정보를 확인하세요.">
-  <title>부산 상가지도</title>
+  <meta name="description" content="전국의 도시를 선택하고 상가(상권) 정보, 리뷰, 메뉴와 길찾기를 확인하세요.">
+  <title>전국 상가지도</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%23007AFF'/%3E%3Cpath d='M32 50s14-11.5 14-24a14 14 0 10-28 0c0 12.5 14 24 14 24z' fill='%23fff'/%3E%3Ccircle cx='32' cy='26' r='5.5' fill='%23007AFF'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="vendor/maplibre-gl.css">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <div id="map" aria-label="부산 상가 지도"></div>
+  <div id="map" aria-label="전국 상가 지도"></div>
 
   <!-- 좌측 패널(데스크톱) / 바텀시트(모바일) -->
   <aside id="sidebar" class="sidebar glass" data-detent="peek" aria-label="상가 검색 및 목록">
     <div id="grab" class="grab" role="separator" aria-label="패널 크기 조절"><span></span></div>
     <header class="sb-head">
       <div class="sb-title">
-        <h1>부산 상가지도</h1>
-        <p id="sub">부산광역시</p>
+        <h1>전국 상가지도</h1>
+        <p id="sub">지역 선택</p>
       </div>
+      <div class="region-selectors">
+        <label><span>시·도</span><select id="region-select" aria-label="시·도 선택"></select></label>
+        <label><span>시·군·구</span><select id="city-select" aria-label="시·군·구 선택"></select></label>
+      </div>
+      <p id="region-status" class="region-status" role="status" aria-live="polite"></p>
       <label class="searchbar" for="q">
         <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
         <input id="q" type="search" placeholder="상호명 · 주소 · 초성 검색" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="상가 검색">
@@ -96,7 +101,7 @@
       <div class="splash-ic">
         <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s6.5-5.6 6.5-11a6.5 6.5 0 10-13 0c0 5.4 6.5 11 6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>
       </div>
-      <h2>부산 상가지도</h2>
+      <h2>전국 상가지도</h2>
       <p id="splash-txt">상가 데이터 불러오는 중…</p>
       <div class="splash-track"><i id="splash-bar"></i></div>
     </div>
