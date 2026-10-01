@@ -28,6 +28,8 @@ export function initUI() {
   initSheet();
   $('#region-select').addEventListener('change', (e) => bus.emit('region-select', e.target.value));
   $('#city-select').addEventListener('change', (e) => bus.emit('city-select', e.target.value));
+  setupRegionPicker('region', '시·도');
+  setupRegionPicker('city', '시·군·구');
 
   bus.on('move', debounce(refreshList, 140));
   bus.on('filter-changed', () => {
@@ -56,6 +58,44 @@ function syncRegionSelectors() {
   $('#sub').textContent = `${D.meta.regionName}${city ? ' · ' + city.name : ''} · ${fmt(city ? city.count : D.n)}개 상가`;
   $('#region-select').value = D.region;
   $('#city-select').value = city ? city.code : '';
+  for (const kind of ['region', 'city']) {
+    const button = $(`#${kind}-picker`);
+    const select = $(`#${kind}-select`);
+    if (button) button.querySelector('strong').textContent = select.selectedOptions[0]?.textContent || '선택';
+  }
+}
+
+function setupRegionPicker(kind, title) {
+  const select = $(`#${kind}-select`);
+  select.hidden = true;
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.id = `${kind}-picker`;
+  button.className = 'region-picker';
+  button.setAttribute('aria-label', `${title} 선택`);
+  button.setAttribute('aria-haspopup', 'dialog');
+  button.innerHTML = `<strong>${esc(select.selectedOptions[0]?.textContent || '선택')}</strong><span aria-hidden="true">⌄</span>`;
+  select.after(button);
+  button.addEventListener('click', () => {
+    const modal = openModal({ className: 'region-choice-modal' });
+    modal.el.setAttribute('aria-label', `${title} 선택`);
+    modal.scroll.innerHTML = `<h2>${title} 선택</h2><p class="region-choice-hint">보고 싶은 지역을 선택하세요.</p><input class="region-choice-search" type="search" aria-label="${title} 검색" placeholder="지역 이름 검색"><div class="region-choice-list" role="listbox" aria-label="${title} 목록"></div>`;
+    const input = modal.el.querySelector('input');
+    const list = modal.el.querySelector('[role="listbox"]');
+    function render() {
+      const options = [...select.options].filter((o) => o.textContent.includes(input.value.trim()));
+      list.innerHTML = options.length ? options.map((o) => `<button type="button" role="option" aria-selected="${o.value === select.value}" data-value="${esc(o.value)}"><span>${esc(o.textContent)}</span><b aria-hidden="true">${o.value === select.value ? '✓' : '›'}</b></button>`).join('') : '<p class="region-choice-hint">검색 결과가 없어요.</p>';
+    }
+    input.addEventListener('input', render);
+    list.addEventListener('click', (e) => {
+      const option = e.target.closest('[data-value]');
+      if (!option) return;
+      const value = option.dataset.value;
+      modal.close();
+      bus.emit(`${kind}-select`, value);
+    });
+    render();
+  });
 }
 
 export function refreshRegionUI() {

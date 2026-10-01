@@ -377,6 +377,25 @@ mark { background: rgba(255, 204, 0, 0.5); color: inherit; border-radius: 3px; p
 .region-selectors span { display: block; font-size: 11px; color: var(--label2); margin: 0 4px 4px; }
 .region-selectors select { width: 100%; padding: 9px 8px; border-radius: 10px; border: 1px solid var(--sep); background: var(--fill); color: var(--label); font: inherit; font-size: 13px; }
 .region-selectors select:disabled { opacity: 0.6; }
+.region-selectors select[hidden] { display: none; }
+.region-selectors { gap: 10px; }
+.region-selectors > label { display: block; }
+.region-picker { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 46px; padding: 11px 13px; border: 1px solid var(--sep); border-radius: 13px; background: var(--card); color: var(--label); text-align: left; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,.04); }
+.region-picker strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+.region-picker span { margin: 0; color: var(--blue); font-size: 20px; }
+.region-picker:hover { border-color: var(--blue); }
+.region-picker:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+.region-choice-modal { max-width: 460px; background: var(--sheet); }
+.region-choice-modal .m-scroll { padding: 26px 22px 22px; }
+.region-choice-modal h2 { margin: 0 36px 6px 0; }
+.region-choice-hint { margin: 0 0 18px; color: var(--label2); font-size: 13px; }
+.region-choice-search { width: 100%; padding: 13px 15px; margin-bottom: 14px; border: 1px solid var(--sep); border-radius: 13px; background: var(--card); color: var(--label); font: inherit; outline-color: var(--blue); }
+.region-choice-list { display: grid; gap: 5px; }
+.region-choice-list button { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 47px; padding: 12px 15px; border: 1px solid transparent; border-radius: 12px; background: var(--card); color: var(--label); text-align: left; font: inherit; font-size: 14px; cursor: pointer; }
+.region-choice-list button b { color: var(--label2); }
+.region-choice-list button:hover { border-color: var(--blue); }
+.region-choice-list button[aria-selected="true"] { background: var(--blue); color: white; font-weight: 600; }
+.region-choice-list button[aria-selected="true"] b { color: white; }
 .region-status { color: var(--label2); font-size: 12px; line-height: 1.4; }
 .region-status:empty { display: none; }
 @keyframes sh { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }

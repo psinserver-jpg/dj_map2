@@ -56,8 +56,9 @@ test('도시 필터는 지도, 검색, 주변 검색에 적용하고 지역을 �
     fixtures[`data/regions/${region}/points.js`] = { BUSAN_POINTS: { n: 2, id: [region + '-1', region + '-2'], name: ['검증식당', '검증식당'], addr: ['주소1', '주소2'], lon: [129, 129], lat: [35, 35], sub: [0, 0], dist: [0, 1], branch: {}, bname: {} } };
   }
   const window = {};
+  let scriptLoads = 0;
   const context = { window, chosung: (s) => s, isJamo: () => false, document: {
-    createElement: () => ({ remove() {} }), head: { appendChild(el) { Object.assign(window, fixtures[el.src]); queueMicrotask(() => el.onload()); } },
+    createElement: () => ({ remove() {} }), head: { appendChild(el) { scriptLoads++; Object.assign(window, fixtures[el.src]); queueMicrotask(() => el.onload()); } },
   } };
   vm.createContext(context);
   vm.runInContext(src + '; globalThis.api = { D, filter, loadData, applyFilter, search, queryRadius, indexOfId };', context);
@@ -73,6 +74,12 @@ test('도시 필터는 지도, 검색, 주변 검색에 적용하고 지역을 �
   await api.loadData(null, '11');
   assert.equal(api.indexOfId('26-2'), undefined);
   assert.equal(api.indexOfId('11-2'), 1);
+  assert.equal(api.filter.city, null);
+  const loadsBeforeReturn = scriptLoads;
+  await api.loadData(null, '26');
+  assert.equal(scriptLoads, loadsBeforeReturn);
+  assert.equal(api.D.region, '26');
+  assert.equal(api.indexOfId('26-2'), 1);
   assert.equal(api.filter.city, null);
 });
 test('길찾기 좌표 순서와 이동 수단, 직접 입력한 주소를 올바르게 전달한다', async () => {

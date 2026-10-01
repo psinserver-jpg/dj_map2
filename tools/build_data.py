@@ -9,6 +9,7 @@
 """
 import csv
 import glob
+import gzip
 import json
 import os
 import statistics
@@ -247,6 +248,10 @@ def build(shop_csv, output_dir):
             fh.write(prefix)
             json.dump(obj, fh, ensure_ascii=False, separators=(",", ":"))
             fh.write(";\n")
+        if prefix in ("window.BUSAN_META=", "window.BUSAN_POINTS="):
+            payload = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            with open(path.removesuffix(".js") + ".json.gz", "wb") as packed:
+                packed.write(gzip.compress(payload, compresslevel=6, mtime=0))
         return os.path.getsize(path)
 
     sizes = {}

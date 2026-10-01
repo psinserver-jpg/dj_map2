@@ -351,6 +351,7 @@ function bindEvents() {
 // ---------- 데이터 ----------
 let allFC = null;
 let allRegion = null;
+let lastF = null;
 function buildFC(F) {
   const feats = new Array(F.length);
   for (let k = 0; k < F.length; k++) {
@@ -361,6 +362,8 @@ function buildFC(F) {
 }
 
 export function setShops(F, isAll) {
+  if (lastF === F && allRegion === D.region) return;
+  lastF = F;
   if (allRegion !== D.region) { allFC = null; allRegion = D.region; }
   const fc = isAll ? (allFC ||= buildFC(F)) : buildFC(F);
   map.getSource('shops').setData(fc);

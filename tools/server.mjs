@@ -112,7 +112,7 @@ export function createServer() {
       if (!filename.startsWith(root + path.sep)) return json(response, 404, { message: 'Not found' });
       const info = await stat(filename);
       if (!info.isFile()) return json(response, 404, { message: 'Not found' });
-      response.writeHead(200, { 'Content-Type': mime[path.extname(filename)] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
+      response.writeHead(200, { 'Content-Type': mime[path.extname(filename)] || 'application/octet-stream', 'Cache-Control': filename.endsWith('.json.gz') ? 'public, max-age=3600' : 'no-cache', 'X-Content-Type-Options': 'nosniff' });
       response.end(await readFile(filename));
     } catch (error) {
       json(response, error.code === 'ENOENT' ? 404 : error.status || 502, { code: error.code, message: error.code === 'ENOENT' ? 'Not found' : error.status ? error.message : '정보를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.' });

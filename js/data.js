@@ -5,6 +5,12 @@ export const D = {};
 // 활성 필터 (비어 있으면 전체)
 export const filter = { subs: new Set(), dists: new Set(), city: null };
 export const catalog = {};
+const regionCache = new Map();
+async function compressedData(path) {
+  const response = await fetch(path);
+  if (!response.ok) throw new Error('압축 데이터 요청 실패');
+  return new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).json();
+}
 
 // <script> 태그로 데이터 파일을 읽는다 (file:// 로 열어도 동작; fetch/XHR은 file:// 에서 차단됨)
 function loadScript(src) {
@@ -35,13 +41,22 @@ export async function loadData(onProgress, region = '26') {
   }
   const selected = catalog.regions.find((r) => r.code === region) || catalog.regions.find((r) => r.code === '26') || catalog.regions[0];
   const basePath = `data/regions/${selected.code}`;
-  await loadScript(`${basePath}/meta.js`);
-  onProgress && onProgress(0.15);
-  await loadScript(`${basePath}/points.js`);
+  let meta, p;
+  const cached = regionCache.get(selected.code);
+  if (!cached && typeof DecompressionStream !== 'undefined' && location.protocol !== 'file:') {
+    try {
+      [meta, p] = await Promise.all([compressedData(`${basePath}/meta.json.gz`), compressedData(`${basePath}/points.json.gz`)]);
+    } catch { /* Old deployments and browsers can still use the original files. */ }
+  }
+  if (!cached && (!meta || !p)) {
+    await loadScript(`${basePath}/meta.js`);
+    onProgress && onProgress(0.15);
+    await loadScript(`${basePath}/points.js`);
+    meta = window.BUSAN_META;
+    p = window.BUSAN_POINTS;
+  }
   onProgress && onProgress(0.9);
-  const meta = window.BUSAN_META;
-  const p = window.BUSAN_POINTS;
-  if (!Array.isArray(meta?.cats) || !Array.isArray(p?.id) || p.id.length !== p.n) throw new Error(`${basePath}의 상가 데이터가 올바르지 않아요. meta.js와 points.js 파일을 확인해 주세요.`);
+  if (!cached && (!Array.isArray(meta?.cats) || !Array.isArray(p?.id) || p.id.length !== p.n)) throw new Error(`${basePath}의 상가 데이터가 올바르지 않아요. meta.js와 points.js 파일을 확인해 주세요.`);
   delete window.BUSAN_META;
   delete window.BUSAN_POINTS;
   for (const key of Object.keys(D)) delete D[key];
@@ -51,6 +66,13 @@ export async function loadData(onProgress, region = '26') {
   filter.subs.clear();
   filter.dists.clear();
   filter.city = null;
+  if (cached) {
+    Object.assign(D, cached);
+    regionCache.delete(selected.code);
+    regionCache.set(selected.code, cached);
+    applyFilter();
+    return;
+  }
   D.basePath = basePath;
   D.region = selected.code;
   D.meta = meta;
@@ -73,6 +95,8 @@ export async function loadData(onProgress, region = '26') {
   D.bname = new Map(Object.entries(p.bname).map(([k, v]) => [+k, v]));
   D.nl = p.name.map((s) => s.toLowerCase());
   D.al = p.addr.map((s) => s.toLowerCase());
+  regionCache.set(selected.code, { ...D });
+  if (regionCache.size > 2) regionCache.delete(regionCache.keys().next().value);
   applyFilter();
 }
 
