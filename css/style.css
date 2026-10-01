@@ -95,6 +95,7 @@ h1, h2, h3, p { margin: 0; }
 .splash p { margin: 6px 0 18px; font-size: 14px; color: var(--label2); line-height: 1.5; }
 .splash-track { height: 5px; border-radius: 3px; background: var(--fill); overflow: hidden; }
 .splash-track i { display: block; height: 100%; width: 4%; border-radius: 3px; background: var(--blue); transition: width 0.25s var(--ease); }
+.splash-retry { padding: 11px 22px; border: 0; border-radius: 12px; background: var(--blue); color: white; font: inherit; cursor: pointer; }
 @keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ==========================================================================

@@ -136,6 +136,7 @@ async function loadData(onProgress, region = '26') {
   onProgress && onProgress(0);
   if (!catalog.regions) {
     await loadScript('data/regions.js');
+    if (!Array.isArray(window.STORE_REGIONS?.regions) || !window.STORE_REGIONS.regions.length) throw new Error('지역 목록 데이터가 올바르지 않아요. data/regions.js 파일을 확인해 주세요.');
     Object.assign(catalog, window.STORE_REGIONS);
     delete window.STORE_REGIONS;
   }
@@ -147,6 +148,7 @@ async function loadData(onProgress, region = '26') {
   onProgress && onProgress(0.9);
   const meta = window.BUSAN_META;
   const p = window.BUSAN_POINTS;
+  if (!Array.isArray(meta?.cats) || !Array.isArray(p?.id) || p.id.length !== p.n) throw new Error(`${basePath}의 상가 데이터가 올바르지 않아요. meta.js와 points.js 파일을 확인해 주세요.`);
   delete window.BUSAN_META;
   delete window.BUSAN_POINTS;
   for (const key of Object.keys(D)) delete D[key];
@@ -2465,7 +2467,7 @@ const M = __m_map;
 const { initUI, refreshRegionUI, renderChips, syncPop, setDetent } = __m_ui;
 const { openDetail, closeDetail } = __m_detail;
 const { S, pushRecent } = __m_state;
-const { $, bus, debounce, store, toast, fmt } = __m_util;
+const { $, bus, debounce, store, toast, fmt, esc } = __m_util;
 
 const isMobile = () => matchMedia('(max-width: 767px)').matches;
 const view = { basemap: store.get('busan-basemap', 'std'), theme: store.get('busan-theme', 'auto'), heat: false };
@@ -2754,8 +2756,14 @@ async function boot() {
   } catch (err) {
     console.error(err);
     $('#splash-txt').innerHTML =
-      '데이터를 불러오지 못했어요.<br><small>web2 폴더의 <b>data</b> 폴더가 그대로 있는지 확인해 주세요.</small>';
+      `데이터를 불러오지 못했어요.<br><small>${esc(err.message || '데이터 요청에 실패했어요.')}</small>`;
     $('#splash-bar').parentElement.hidden = true;
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'splash-retry';
+    retry.textContent = '다시 시도';
+    retry.addEventListener('click', () => location.reload());
+    $('#splash-txt').after(retry);
     return;
   }
   applyHashState(h);

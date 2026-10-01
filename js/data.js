@@ -29,6 +29,7 @@ export async function loadData(onProgress, region = '26') {
   onProgress && onProgress(0);
   if (!catalog.regions) {
     await loadScript('data/regions.js');
+    if (!Array.isArray(window.STORE_REGIONS?.regions) || !window.STORE_REGIONS.regions.length) throw new Error('지역 목록 데이터가 올바르지 않아요. data/regions.js 파일을 확인해 주세요.');
     Object.assign(catalog, window.STORE_REGIONS);
     delete window.STORE_REGIONS;
   }
@@ -40,6 +41,7 @@ export async function loadData(onProgress, region = '26') {
   onProgress && onProgress(0.9);
   const meta = window.BUSAN_META;
   const p = window.BUSAN_POINTS;
+  if (!Array.isArray(meta?.cats) || !Array.isArray(p?.id) || p.id.length !== p.n) throw new Error(`${basePath}의 상가 데이터가 올바르지 않아요. meta.js와 points.js 파일을 확인해 주세요.`);
   delete window.BUSAN_META;
   delete window.BUSAN_POINTS;
   for (const key of Object.keys(D)) delete D[key];

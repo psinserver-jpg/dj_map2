@@ -3,7 +3,7 @@ import * as M from './map.js';
 import { initUI, refreshRegionUI, renderChips, syncPop, setDetent } from './ui.js';
 import { openDetail, closeDetail } from './detail.js';
 import { S, pushRecent } from './state.js';
-import { $, bus, debounce, store, toast, fmt } from './util.js';
+import { $, bus, debounce, store, toast, fmt, esc } from './util.js';
 
 const isMobile = () => matchMedia('(max-width: 767px)').matches;
 const view = { basemap: store.get('busan-basemap', 'std'), theme: store.get('busan-theme', 'auto'), heat: false };
@@ -292,8 +292,14 @@ async function boot() {
   } catch (err) {
     console.error(err);
     $('#splash-txt').innerHTML =
-      '데이터를 불러오지 못했어요.<br><small>web2 폴더의 <b>data</b> 폴더가 그대로 있는지 확인해 주세요.</small>';
+      `데이터를 불러오지 못했어요.<br><small>${esc(err.message || '데이터 요청에 실패했어요.')}</small>`;
     $('#splash-bar').parentElement.hidden = true;
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'splash-retry';
+    retry.textContent = '다시 시도';
+    retry.addEventListener('click', () => location.reload());
+    $('#splash-txt').after(retry);
     return;
   }
   applyHashState(h);
