@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+data/apify-cache/
+__pycache__/
+.local/
+artifacts/
+node_modules/
