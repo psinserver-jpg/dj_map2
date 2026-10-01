@@ -1,6 +1,7 @@
 import { D } from './data.js';
 import { esc } from './util.js';
 import { icon } from './icons.js';
+import { apiJSON } from './api.js';
 
 const group = (title, content) => `<section class="group"><h3>${title}</h3><div class="card">${content}</div></section>`;
 const message = (text) => `<p class="place-message">${esc(text)}</p>`;
@@ -31,10 +32,8 @@ export async function fillPlace(i, slot, signal, retry = false) {
     const started = Date.now();
     let data;
     while (true) {
-      const response = await fetch(endpoint + (retry ? '&retry=1' : ''), { signal, cache: 'no-store' });
+      data = await apiJSON(endpoint + (retry ? '&retry=1' : ''), { signal, cache: 'no-store' });
       retry = false;
-      data = await response.json();
-      if (!response.ok) throw new Error(data.message || '리뷰를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
       if (data.status !== 'pending') break;
       if (Date.now() - started > 210000) throw new Error('리뷰 수집이 지연되고 있어요. 잠시 후 다시 불러와 주세요.');
       await new Promise((resolve, reject) => {

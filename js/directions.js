@@ -3,6 +3,8 @@ import { openModal } from './modal.js';
 import { esc } from './util.js';
 import { icon } from './icons.js';
 import { createRouteView } from './routing.js';
+import { apiJSON } from './api.js';
+import { startNavigation } from './navigation.js';
 
 export function routeURLs(destination, origin, mode = 'car', address = '') {
   const point = (p) => `${encodeURIComponent(p.name.replace(/,/g, ' '))},${p.lat},${p.lon}`;
@@ -25,8 +27,11 @@ export function openDirections(i) {
   let request = null;
   let routeView = null;
   let response = null;
+  let navigation = null;
+  let selectedRouteIndex = 0;
+  let followPosition = true;
   const cache = new Map();
-  const m = openModal({ className: 'directions', onClose: () => { alive = false; request?.abort(); routeView?.destroy(); } });
+  const m = openModal({ className: 'directions', onClose: () => { alive = false; navigation?.stop(); request?.abort(); routeView?.destroy(); } });
   m.scroll.innerHTML = `<div class="f-head"><h2>길찾기</h2></div>
     <section class="group"><h3>도착지</h3><div class="card">
       <div class="r stack"><span class="r-l">${esc(destination.name)}</span><span class="r-v">${esc(D.addr[i])}</span></div></div></section>
@@ -42,6 +47,12 @@ export function openDirections(i) {
     </div></section>
     <section class="group"><button type="button" class="primary" data-route="search" disabled>경로 찾기</button></section>
     <section class="group"><h3>경로 지도</h3><div class="card"><div class="route-map" role="region" aria-label="길찾기 경로 지도"></div></div></section>
+    <section class="group navigation-panel" hidden><div class="card">
+      <div class="navigation-banner" role="status" aria-live="polite"><b>실시간 이동 안내</b><p>현재 위치에 맞춰 지도와 다음 이동 안내를 표시합니다.</p></div>
+      <div class="navigation-metrics"></div>
+      <div class="navigation-controls"><button type="button" class="primary" data-nav="start">실시간 안내 시작</button><button type="button" class="btn" data-nav="stop" hidden>안내 종료</button><button type="button" class="btn" data-nav="voice" hidden>음성 켜짐</button><button type="button" class="btn" data-nav="follow" hidden>위치 따라가기 켜짐</button></div>
+      <p class="hint">위치 권한이 필요합니다. 이 화면이 열려 있는 동안 안내합니다. 대중교통 승하차는 안내 내용을 확인해 주세요.</p>
+    </div></section>
     <div class="route-output" aria-live="polite"><p class="place-message">출발지를 선택하면 웹 안에서 경로를 확인할 수 있어요.</p></div>
     <section class="group"><h3>지도 앱에서도 보기</h3><div class="card linkrow">
       <a data-provider="kakao" target="_blank" rel="noopener noreferrer"><i style="background:#FEE500;color:#191919">K</i>카카오맵 길찾기${icon('ext')}</a>
@@ -52,6 +63,9 @@ export function openDirections(i) {
   const status = m.scroll.querySelector('.route-status');
   const searchButton = m.scroll.querySelector('[data-route="search"]');
   const output = m.scroll.querySelector('.route-output');
+  const navPanel = m.scroll.querySelector('.navigation-panel');
+  const navBanner = m.scroll.querySelector('.navigation-banner');
+  const navMetrics = m.scroll.querySelector('.navigation-metrics');
   routeView = createRouteView(m.scroll.querySelector('.route-map'), destination);
   const labels = { car: '자동차', walk: '도보', traffic: '대중교통' };
   const modes = { WALK: '도보', CAR: '자동차', BUS: '버스', SUBWAY: '지하철', TRAIN: '기차', EXPRESSBUS: '고속·시외버스', AIRPLANE: '항공', FERRY: '배' };
@@ -61,9 +75,11 @@ export function openDirections(i) {
     return minutes >= 60 ? `${Math.floor(minutes / 60)}시간 ${minutes % 60}분` : `${minutes}분`;
   };
   const distance = (meters) => meters == null ? '거리 미제공' : meters < 1000 ? `${Math.round(meters)}m` : `${(meters / 1000).toFixed(1)}km`;
-  function cancel() { request?.abort(); request = null; response = null; routeView.show(null, origin); }
+  function cancel() { navigation?.stop(); navigation = null; navPanel.hidden = true; request?.abort(); request = null; response = null; routeView.show(null, origin); }
   function showRoute(index) {
+    selectedRouteIndex = index;
     const route = response.routes[index];
+    navPanel.hidden = !route.geometry.features.length;
     routeView.show(route, origin);
     output.innerHTML = `<section class="group"><h3>${labels[mode]} 경로</h3><div class="card">
       ${response.routes.length > 1 ? `<div class="route-alternatives">${response.routes.map((r, k) => `<button type="button" class="route-option${k === index ? ' on' : ''}" data-route-index="${k}" aria-pressed="${k === index}"><b>${k === 0 ? '추천 경로' : '경로 ' + (k + 1)}</b><span>${time(r.duration)} · ${distance(r.distance)}</span></button>`).join('')}</div>` : ''}
@@ -80,6 +96,48 @@ export function openDirections(i) {
         ${step.details?.length ? `<details><summary>도보 상세 안내</summary>${step.details.map((text) => `<p>${esc(text)}</p>`).join('')}</details>` : ''}</li>`).join('')}</ol>
       <p class="place-message">${esc(response.source)} 제공</p></div></section>`;
   }
+  function navigationButtons(running) {
+    m.el.querySelector('[data-nav="start"]').hidden = running;
+    for (const key of ['stop', 'voice', 'follow']) m.el.querySelector(`[data-nav="${key}"]`).hidden = !running;
+  }
+  function beginNavigation() {
+    if (!response || navigation) return;
+    followPosition = true;
+    navigationButtons(true);
+    navBanner.innerHTML = '<b>현재 위치 확인 중</b><p>GPS 신호를 기다리고 있어요.</p>';
+    navMetrics.textContent = '';
+    m.el.querySelector('[data-nav="voice"]').textContent = '음성 켜짐';
+    m.el.querySelector('[data-nav="follow"]').textContent = '위치 따라가기 켜짐';
+    navigation = startNavigation({ route: response.routes[selectedRouteIndex], destination, mode,
+      onPosition(point) { if (alive && followPosition) routeView.follow(point); },
+      onUpdate(state, point) {
+        if (!alive) return;
+        navBanner.innerHTML = `<b>${state.message ? esc(state.message) : state.poorAccuracy ? 'GPS 위치가 부정확해요' : state.offRoute ? '경로를 다시 확인하고 있어요' : `${distance(state.turnDistance)} 앞`}</b><p>${state.next ? esc(state.next.instruction) : '잠시 기다려 주세요.'}</p>`;
+        if (point) navMetrics.innerHTML = `<span>남은 거리 <b>${distance(state.remaining)}</b></span><span>예상 남은 시간 <b>${time(state.duration)}</b></span><span>속도 <b>${point.speed == null ? '—' : Math.round(point.speed * 3.6) + 'km/h'}</b></span>`;
+      },
+      async onReroute(point) {
+        navBanner.innerHTML = '<b>경로 재탐색 중</b><p>현재 위치에서 도착지까지 다시 탐색하고 있어요.</p>';
+        const controller = new AbortController();
+        request?.abort();
+        request = controller;
+        const data = await apiJSON('/api/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+          body: JSON.stringify({ mode, origin: { name: '현재 위치', lon: point.lon, lat: point.lat }, id: D.id[i], region: D.region }) });
+        if (!alive || controller.signal.aborted || !navigation) return null;
+        origin = { name: '현재 위치', lon: point.lon, lat: point.lat };
+        response = data;
+        showRoute(0);
+        request = null;
+        return data.routes[0];
+      },
+      onStop(message) {
+        navigation = null;
+        if (!alive) return;
+        navigationButtons(false);
+        navBanner.innerHTML = `<b>${esc(message)}</b>`;
+        routeView.clearPosition();
+      },
+    });
+  }
   async function findRoute() {
     if (!origin) { status.textContent = '목록에서 출발지를 선택해 주세요.'; return; }
     cancel();
@@ -92,10 +150,8 @@ export function openDirections(i) {
     output.innerHTML = `<section class="group"><h3>${labels[mode]} 경로</h3><div class="card"><div class="shimmer"></div><p class="place-message">실제 경로를 검색하고 있어요…</p></div></section>`;
     try {
       if (location.protocol === 'file:') throw new Error('웹 서버로 접속하면 내장 길찾기를 사용할 수 있어요.');
-      const result = await fetch('/api/route', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const data = await apiJSON('/api/route', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode, origin, id: D.id[i], region: D.region }), signal: controller.signal });
-      const data = await result.json();
-      if (!result.ok) throw new Error(data.message || '경로를 불러오지 못했어요.');
       if (!alive || controller.signal.aborted || mode !== selectedMode) return;
       cache.set(key, data);
       response = data;
@@ -123,6 +179,14 @@ export function openDirections(i) {
     update();
   });
   m.scroll.addEventListener('click', (e) => {
+    const navButton = e.target.closest('[data-nav]');
+    if (navButton) {
+      if (navButton.dataset.nav === 'start') beginNavigation();
+      if (navButton.dataset.nav === 'stop') { request?.abort(); navigation?.stop(); }
+      if (navButton.dataset.nav === 'voice' && navigation) navButton.textContent = navigation.toggleVoice() ? '음성 켜짐' : '음성 꺼짐';
+      if (navButton.dataset.nav === 'follow') { followPosition = !followPosition; navButton.textContent = followPosition ? '위치 따라가기 켜짐' : '위치 따라가기 꺼짐'; }
+      return;
+    }
     const result = e.target.closest('[data-origin]');
     if (result) {
       const j = +result.dataset.origin;
@@ -148,7 +212,7 @@ export function openDirections(i) {
       if (hadRoute && origin) findRoute();
     }
     const alternative = e.target.closest('[data-route-index]');
-    if (alternative && response) showRoute(+alternative.dataset.routeIndex);
+    if (alternative && response) { navigation?.stop(); navigation = null; showRoute(+alternative.dataset.routeIndex); }
     if (e.target.closest('[data-route="search"]')) findRoute();
     const locate = e.target.closest('[data-route="locate"]');
     if (!locate || locating) return;

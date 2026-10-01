@@ -2,9 +2,10 @@
   "name": "national-shop-map",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "start": "node tools/server.mjs",
-    "test": "node --test tools/service.test.mjs tools/route.test.mjs tools/compression.test.mjs"
+    "test": "node --test tools/service.test.mjs tools/route.test.mjs tools/compression.test.mjs tools/navigation.test.mjs"
   },
   "engines": { "node": ">=22.16.0" }
 }

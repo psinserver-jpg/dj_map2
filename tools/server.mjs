@@ -39,7 +39,7 @@ async function requestJSON(request) {
   }
   try { return JSON.parse(body); } catch { throw Object.assign(new Error('요청 형식을 확인해 주세요.'), { status: 400 }); }
 }
-const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
+const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml' };
 function json(response, status, data) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   response.end(JSON.stringify(data));
@@ -51,9 +51,19 @@ export function createServer() {
   return http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://localhost');
+      if (url.pathname === '/api/health') return json(response, 200, { status: 'ok' });
+      if (url.pathname.startsWith('/api/')) {
+        const origin = request.headers.origin;
+        const allowed = [process.env.PUBLIC_ORIGIN, `http://${request.headers.host}`, `https://${request.headers.host}`].filter(Boolean);
+        if (origin && !allowed.includes(origin)) return json(response, 403, { message: '허용되지 않은 요청이에요.' });
+        if (origin) response.setHeader('Access-Control-Allow-Origin', origin);
+        response.setHeader('Vary', 'Origin');
+        response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        response.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        if (request.method === 'OPTIONS') { response.writeHead(204); response.end(); return; }
+      }
       if (url.pathname === '/api/route') {
         if (request.method !== 'POST') return json(response, 405, { message: 'POST only' });
-        if (request.headers.origin && request.headers.origin !== `http://${request.headers.host}` && request.headers.origin !== `https://${request.headers.host}`) return json(response, 403, { message: '허용되지 않은 요청이에요.' });
         const input = await requestJSON(request);
         if (!['car', 'walk', 'traffic'].includes(input.mode) || !validPoint(input.origin)) return json(response, 400, { message: '출발지와 이동 수단을 확인해 주세요.' });
         const destination = await shopById(input.id, input.region);
@@ -65,7 +75,6 @@ export function createServer() {
       }
       if (request.method !== 'GET') return json(response, 405, { message: 'GET only' });
       if (url.pathname === '/api/place') {
-        if (request.headers.origin && request.headers.origin !== `http://${request.headers.host}` && request.headers.origin !== `https://${request.headers.host}`) return json(response, 403, { message: '허용되지 않은 요청이에요.' });
         const token = process.env.APIFY_TOKEN;
         if (!token || token.includes('<YOUR_API_TOKEN>')) return json(response, 503, { code: 'API_TOKEN_MISSING', message: '리뷰 서비스 연결을 준비하고 있어요. 지금은 지도에서 실제 리뷰를 확인할 수 있어요.' });
         const id = url.searchParams.get('id');
@@ -107,7 +116,7 @@ export function createServer() {
       }
       const relative = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
       // Serve only public assets; never expose environment files or source tools.
-      if (!/^(?:index\.html|app\.js|(?:css|data|vendor)\/[\w./-]+)$/.test(relative) || relative.split('/').some((part) => part === '..' || part.startsWith('.'))) return json(response, 404, { message: 'Not found' });
+      if (!/^(?:index\.html|app\.js|api-config\.json|(?:css|data|vendor)\/[\w./-]+)$/.test(relative) || relative.split('/').some((part) => part === '..' || part.startsWith('.'))) return json(response, 404, { message: 'Not found' });
       const filename = path.resolve(root, relative);
       if (!filename.startsWith(root + path.sep)) return json(response, 404, { message: 'Not found' });
       const info = await stat(filename);

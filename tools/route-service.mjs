@@ -21,7 +21,7 @@ export function normalizeRoad(data, mode) {
   const geometry = features.filter((f) => f.geometry?.type === 'LineString').map((f) => line(f.geometry.coordinates, mode === 'walk' ? 'WALK' : 'CAR', color)).filter(Boolean);
   if (!geometry.length) throw failure('경로 좌표가 제공되지 않았어요.', 404, 'NO_GEOMETRY');
   return [{ duration: number(summary.totalTime), distance: number(summary.totalDistance), toll: mode === 'car' ? number(summary.totalFare) : null,
-    steps: features.filter((f) => f.geometry?.type === 'Point' && f.properties?.description).map((f) => ({ mode: mode === 'walk' ? 'WALK' : 'CAR', instruction: f.properties.description, distance: number(f.properties.distance), duration: number(f.properties.time) })),
+    steps: features.filter((f) => f.geometry?.type === 'Point' && f.properties?.description).map((f) => ({ mode: mode === 'walk' ? 'WALK' : 'CAR', instruction: f.properties.description, location: { lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] }, distance: number(f.properties.distance), duration: number(f.properties.time) })),
     geometry: { type: 'FeatureCollection', features: geometry } }];
 }
 export function normalizeTransit(data) {
@@ -37,6 +37,7 @@ export function normalizeTransit(data) {
         if (f) geometry.push(f);
       }
       return { mode: leg.mode, route: leg.route || '', from: leg.start?.name || '', to: leg.end?.name || '', duration: number(leg.sectionTime), distance: number(leg.distance),
+        location: validPoint({ lon: number(leg.start?.lon), lat: number(leg.start?.lat) }) ? { lon: number(leg.start.lon), lat: number(leg.start.lat) } : null,
         instruction: leg.mode === 'WALK' ? `${leg.start?.name || '출발지'} → ${leg.end?.name || '도착지'} 도보 이동` : `${leg.route || '대중교통'} · ${leg.start?.name || ''} 승차 → ${leg.end?.name || ''} 하차`,
         details: (leg.steps || []).map((s) => s.description).filter(Boolean), stops: (leg.passStopList?.stations || []).map((s) => s.stationName), service: leg.service };
     });

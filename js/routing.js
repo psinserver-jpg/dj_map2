@@ -6,6 +6,7 @@ export function createRouteView(container, destination) {
   let route = null;
   let origin = null;
   let markers = [];
+  let currentMarker = null;
   function marker(point, text, color) {
     const element = document.createElement('span');
     element.className = 'route-pin';
@@ -48,6 +49,18 @@ export function createRouteView(container, destination) {
   });
   return {
     show(nextRoute, nextOrigin) { route = nextRoute; origin = nextOrigin; draw(); },
-    destroy() { markers.forEach((m) => m.remove()); map.remove(); },
+    follow(point) {
+      if (!ready) return;
+      if (!currentMarker) {
+        const el = document.createElement('span');
+        el.className = 'navigation-position';
+        el.setAttribute('aria-label', '현재 위치');
+        currentMarker = new window.maplibregl.Marker({ element: el }).setLngLat([point.lon, point.lat]).addTo(map);
+      }
+      currentMarker.setLngLat([point.lon, point.lat]);
+      map.easeTo({ center: [point.lon, point.lat], zoom: 17, pitch: 42, bearing: Number.isFinite(point.heading) ? point.heading : map.getBearing(), duration: 800 });
+    },
+    clearPosition() { currentMarker?.remove(); currentMarker = null; map.easeTo({ pitch: 0, bearing: 0, duration: 400 }); },
+    destroy() { markers.forEach((m) => m.remove()); currentMarker?.remove(); map.remove(); },
   };
 }
