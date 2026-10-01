@@ -8,6 +8,14 @@ import { fetchRoute, validPoint } from './route-service.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 try { process.loadEnvFile(path.join(root, '.env')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+try {
+  const keys = JSON.parse(await readFile(path.join(root, 'server-keys.json'), 'utf8'));
+  for (const name of ['APIFY_TOKEN', 'APIFY_SEED_RUN_ID', 'TMAP_APP_KEY', 'TMAP_TRANSIT_APP_KEY']) {
+    if (!process.env[name] && typeof keys[name] === 'string') process.env[name] = keys[name].trim();
+  }
+} catch (error) {
+  if (error.code !== 'ENOENT') throw new Error('server-keys.json 파일 형식을 확인해 주세요.');
+}
 const regionData = new Map();
 const cacheFile = (key) => path.join(root, '.local', 'reviews', createHash('sha256').update(key).digest('hex') + '.json');
 async function scriptData(filename) {

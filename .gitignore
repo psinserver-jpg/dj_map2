@@ -1,4 +1,5 @@
 .env
+server-keys.json
 .env.*
 !.env.example
 data/apify-cache/
